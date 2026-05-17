@@ -13,3 +13,7 @@ source .venv/bin/activate
 python -m pip install ply
 
 python3 compiler.py tests/somaarr.f77 tests/somaarr.vm
+
+## Relatório
+
+O relatório do projeto encontra-se em `relatorio.tex`.
