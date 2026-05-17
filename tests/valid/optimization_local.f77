@@ -1,0 +1,11 @@
+PROGRAM OPT
+INTEGER A
+A = 1 + 2 * 3
+A = A + 0
+A = A
+IF (.TRUE.) THEN
+PRINT *, A
+ELSE
+PRINT *, 0
+ENDIF
+END

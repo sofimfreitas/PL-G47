@@ -14,41 +14,54 @@ class SemanticAnalyzer:
         self.labels_stack = [set()]
         self.gotos_stack = [set()]
 
-    def predeclare_function(self, name, return_type, params):
+    def _normalize_params(self, params):
+        return [param.upper() for param in params]
+
+    def _predeclare_subprogram(self, name, kind, params, return_type=None):
         name = name.upper()
-        params = [param.upper() for param in params]
+        params = self._normalize_params(params)
         existing = self.subprograms.get(name)
 
         if existing and (
-            existing["kind"] != "function"
-            or existing["return_type"] != return_type
+            existing["kind"] != kind
+            or existing.get("return_type") != return_type
             or existing["params"] != params
         ):
-            raise SemanticError(f"Definição inconsistente da função '{name}'.")
+            raise SemanticError(f"Definição inconsistente do subprograma '{name}'.")
 
         if not existing:
             self.subprograms[name] = {
-                "kind": "function",
+                "kind": kind,
                 "return_type": return_type,
                 "params": params,
                 "defined": False,
             }
 
-    def start_function(self, name, return_type, params):
+    def predeclare_function(self, name, return_type, params):
+        self._predeclare_subprogram(name, "function", params, return_type)
+
+    def predeclare_subroutine(self, name, params):
+        self._predeclare_subprogram(name, "subroutine", params)
+
+    def _start_subprogram(self, name, kind, params, return_type=None):
         name = name.upper()
-        params = [param.upper() for param in params]
+        params = self._normalize_params(params)
 
-        self.predeclare_function(name, return_type, params)
+        if kind == "function":
+            self.predeclare_function(name, return_type, params)
+        else:
+            self.predeclare_subroutine(name, params)
+
         prototype = self.subprograms[name]
-
         if prototype["defined"]:
-            raise SemanticError(f"Função '{name}' definida mais do que uma vez.")
+            readable_kind = "Função" if kind == "function" else "Subrotina"
+            raise SemanticError(f"{readable_kind} '{name}' definida mais do que uma vez.")
 
         self.scope_stack.append((self.current_symbols, self.current_subprogram))
         self.current_symbols = {}
         self.current_subprogram = {
             "name": name,
-            "kind": "function",
+            "kind": kind,
             "return_type": return_type,
             "params": params,
             "missing_params": set(params),
@@ -58,18 +71,28 @@ class SemanticAnalyzer:
         self.labels_stack.append(set())
         self.gotos_stack.append(set())
 
-        self.current_symbols[name] = {
-            "type": return_type,
-            "size": None,
-        }
+        if kind == "function":
+            # Em Fortran 77, o valor de retorno de uma função é obtido atribuindo
+            # à variável com o mesmo nome da função.
+            self.current_symbols[name] = {
+                "type": return_type,
+                "size": None,
+            }
+
+    def start_function(self, name, return_type, params):
+        self._start_subprogram(name, "function", params, return_type)
+
+    def start_subroutine(self, name, params):
+        self._start_subprogram(name, "subroutine", params)
 
     def finish_subprogram(self):
         self.validate_labels()
 
         missing_params = sorted(self.current_subprogram["missing_params"])
         if missing_params:
+            kind_name = "função" if self.current_subprogram["kind"] == "function" else "subrotina"
             raise SemanticError(
-                f"Parâmetros da função '{self.current_subprogram['name']}' sem declaração: {missing_params}"
+                f"Parâmetros da {kind_name} '{self.current_subprogram['name']}' sem declaração: {missing_params}"
             )
 
         self.subprograms[self.current_subprogram["name"]]["defined"] = True
@@ -130,6 +153,10 @@ class SemanticAnalyzer:
         name = name.upper()
         return name in self.subprograms and self.subprograms[name]["kind"] == "function"
 
+    def is_subroutine(self, name):
+        name = name.upper()
+        return name in self.subprograms and self.subprograms[name]["kind"] == "subroutine"
+
     def check_function_call(self, name, arguments):
         name = name.upper()
 
@@ -145,6 +172,25 @@ class SemanticAnalyzer:
             )
 
         return signature["return_type"]
+
+    def check_subroutine_call(self, name, arguments):
+        name = name.upper()
+
+        if name not in self.subprograms or self.subprograms[name]["kind"] != "subroutine":
+            raise SemanticError(f"Subrotina '{name}' não está definida.")
+
+        signature = self.subprograms[name]
+        expected = len(signature["params"])
+        received = len(arguments)
+        if expected != received:
+            raise SemanticError(
+                f"Subrotina '{name}' esperava {expected} argumentos, recebeu {received}."
+            )
+
+    def validate_subprogram_definitions(self):
+        missing = [name for name, data in self.subprograms.items() if not data["defined"]]
+        if missing:
+            raise SemanticError(f"Subprogramas declarados mas não definidos: {sorted(missing)}")
 
     def register_do_label(self, label):
         self.do_labels_stack[-1].add(int(label))

@@ -116,6 +116,50 @@ def resolve_designator_as_variable(designator):
     }
 
 
+def resolve_designator_as_actual_argument(designator):
+    name = designator["name"]
+    args = designator["args"]
+
+    if not args:
+        var = semantic.check_declared(name)
+        if var["size"] is not None:
+            return {
+                "node": "array_argument",
+                "name": name,
+                "type": var["type"],
+                "size": var["size"],
+            }
+        return {
+            "node": "variable",
+            "name": name,
+            "type": var["type"],
+            "size": var["size"],
+        }
+
+    if semantic.is_function(name):
+        return {
+            "node": "function_call",
+            "name": name,
+            "args": args,
+            "type": semantic.check_function_call(name, args),
+        }
+
+    if len(args) != 1:
+        raise SemanticError(f"Acesso a array '{name}' exige exatamente um índice.")
+
+    var = semantic.check_array_access(name)
+    if args[0]["type"] != "INTEGER":
+        raise SemanticError("Índice de array deve ser INTEGER.")
+
+    return {
+        "node": "array_access",
+        "name": name,
+        "index": args[0],
+        "type": var["type"],
+        "size": var["size"],
+    }
+
+
 def resolve_designator_as_expression(designator):
     name = designator["name"]
     args = designator["args"]
@@ -192,11 +236,48 @@ def p_function_definition(p):
     }
 
 
+def p_subroutine_definition(p):
+    """
+    subroutine_definition : subroutine_header declarations statements END opt_subprogram_name opt_newlines
+    """
+    semantic.finish_subprogram()
+    p[0] = {
+        "node": "subroutine",
+        "name": p[1]["name"],
+        "params": p[1]["params"],
+        "declarations": p[2],
+        "statements": p[3],
+    }
+
+
 def p_subprogram(p):
     """
     subprogram : function_definition
+               | subroutine_definition
     """
     p[0] = p[1]
+
+
+def p_subroutine_header_with_params(p):
+    """
+    subroutine_header : SUBROUTINE IDENTIFIER LPAREN parameter_names RPAREN line_end
+    """
+    semantic.start_subroutine(p[2], p[4])
+    p[0] = {
+        "name": p[2],
+        "params": p[4],
+    }
+
+
+def p_subroutine_header_without_params(p):
+    """
+    subroutine_header : SUBROUTINE IDENTIFIER line_end
+    """
+    semantic.start_subroutine(p[2], [])
+    p[0] = {
+        "name": p[2],
+        "params": [],
+    }
 
 
 def p_function_header(p):
@@ -421,6 +502,7 @@ def p_simple_statement(p):
                      | print_statement
                      | read_statement
                      | goto_statement
+                     | call_statement
                      | return_statement
     """
     p[0] = p[1]
@@ -446,6 +528,58 @@ def p_return_statement(p):
     return_statement : RETURN
     """
     p[0] = {"node": "return"}
+
+
+def p_call_statement_with_args(p):
+    """
+    call_statement : CALL IDENTIFIER LPAREN actual_arguments RPAREN
+    """
+    semantic.check_subroutine_call(p[2], p[4])
+    p[0] = {
+        "node": "subroutine_call",
+        "name": p[2],
+        "args": p[4],
+    }
+
+
+def p_call_statement_without_args(p):
+    """
+    call_statement : CALL IDENTIFIER
+    """
+    semantic.check_subroutine_call(p[2], [])
+    p[0] = {
+        "node": "subroutine_call",
+        "name": p[2],
+        "args": [],
+    }
+
+
+def p_actual_arguments_list(p):
+    """
+    actual_arguments : actual_argument_list
+    """
+    p[0] = p[1]
+
+
+def p_actual_arguments_empty(p):
+    """
+    actual_arguments : empty
+    """
+    p[0] = []
+
+
+def p_actual_argument_list_many(p):
+    """
+    actual_argument_list : actual_argument_list COMMA designator
+    """
+    p[0] = p[1] + [resolve_designator_as_actual_argument(p[3])]
+
+
+def p_actual_argument_list_one(p):
+    """
+    actual_argument_list : designator
+    """
+    p[0] = [resolve_designator_as_actual_argument(p[1])]
 
 
 def p_print_statement(p):
@@ -804,7 +938,9 @@ def preprocess_source(data):
     """Normaliza para free-form: ignora linhas vazias e espaços à volta das linhas."""
     lines = []
     for line in data.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        if line and line[0].upper() == "C":
+        # Comentários Fortran 77 em coluna 1. A condição do "C" não pode
+        # eliminar instruções válidas como CALL ou CONTINUE em free-form.
+        if line and line[0].upper() == "C" and (len(line) == 1 or line[1].isspace()):
             continue
         if line and line[0] == "*":
             continue
@@ -822,21 +958,35 @@ def predeclare_subprograms(normalized_source):
         r"^(INTEGER|REAL|LOGICAL)\s+FUNCTION\s+([A-Z][A-Z0-9_]*)\s*\(([^)]*)\)$",
         re.IGNORECASE,
     )
+    subroutine_pattern = re.compile(
+        r"^SUBROUTINE\s+([A-Z][A-Z0-9_]*)(?:\s*\(([^)]*)\))?$",
+        re.IGNORECASE,
+    )
 
     for raw_line in normalized_source.splitlines():
         line = raw_line.strip()
-        match = function_pattern.match(line)
-        if not match:
+
+        function_match = function_pattern.match(line)
+        if function_match:
+            return_type = function_match.group(1).upper()
+            name = function_match.group(2).upper()
+            raw_params = function_match.group(3).strip()
+            params = []
+            if raw_params:
+                params = [param.strip().upper() for param in raw_params.split(",") if param.strip()]
+
+            semantic.predeclare_function(name, return_type, params)
             continue
 
-        return_type = match.group(1).upper()
-        name = match.group(2).upper()
-        raw_params = match.group(3).strip()
-        params = []
-        if raw_params:
-            params = [param.strip().upper() for param in raw_params.split(",") if param.strip()]
+        subroutine_match = subroutine_pattern.match(line)
+        if subroutine_match:
+            name = subroutine_match.group(1).upper()
+            raw_params = (subroutine_match.group(2) or "").strip()
+            params = []
+            if raw_params:
+                params = [param.strip().upper() for param in raw_params.split(",") if param.strip()]
 
-        semantic.predeclare_function(name, return_type, params)
+            semantic.predeclare_subroutine(name, params)
 
 
 def parse_code(data):
@@ -849,6 +999,8 @@ def parse_code(data):
 
     try:
         result = parser.parse(normalized, lexer=fresh_lexer, debug=False)
+        if result is not None:
+            semantic.validate_subprogram_definitions()
         return result
     except SemanticError as e:
         print(f"Erro semântico: {e}")

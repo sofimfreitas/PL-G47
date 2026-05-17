@@ -1,5 +1,6 @@
 import sys
 
+from optimizer import optimize_ast
 from parser import parse_code
 from translator import Translator
 
@@ -14,8 +15,19 @@ def compile_file(input_path, output_path):
         print("Compilação interrompida.")
         return False
 
+    optimized_ast, optimization_stats = optimize_ast(ast)
+    if optimization_stats["total"] > 0:
+        print(
+            "Otimizações aplicadas: "
+            f"{optimization_stats['total']} "
+            f"(constantes: {optimization_stats['constant_folds']}, "
+            f"simplificações: {optimization_stats['algebraic_simplifications']}, "
+            f"atribuições removidas: {optimization_stats['removed_assignments']}, "
+            f"ramos removidos: {optimization_stats['removed_branches']})"
+        )
+
     translator = Translator()
-    vm_code = translator.translate(ast)
+    vm_code = translator.translate(optimized_ast)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(vm_code)

@@ -6,11 +6,10 @@
 \usepackage{geometry}
 \usepackage{listings}
 \usepackage{xcolor}
-\usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{enumitem}
 
-\geometry{margin=2.5cm}
+\geometry{margin=2.2cm}
 
 \hypersetup{
     colorlinks=true,
@@ -32,10 +31,12 @@
     showstringspaces=false
 }
 
+\setlist{noitemsep, topsep=2pt}
+
 \title{
     Processamento de Linguagens \\
     \large Trabalho Prático \\
-    \vspace{0.5cm}
+    \vspace{0.3cm}
     Compilador de Fortran 77 para Máquina Virtual
 }
 
@@ -51,91 +52,66 @@
 \begin{document}
 
 \maketitle
-
 \tableofcontents
-
 \newpage
 
 \section{Resumo}
 
-No âmbito da unidade curricular de Processamento de Linguagens, foi desenvolvido um compilador para um subconjunto da linguagem Fortran 77, com geração de código para a máquina virtual fornecida na unidade curricular.
+No âmbito da unidade curricular de Processamento de Linguagens, foi desenvolvido um compilador para um subconjunto de Fortran 77, com geração de código para a máquina virtual fornecida.
 
-O compilador foi implementado em Python utilizando a biblioteca PLY (\textit{Python Lex-Yacc}), sendo dividido em diferentes fases: análise léxica, análise sintática, análise semântica e geração de código para a máquina virtual.
+O compilador foi implementado em Python com recurso à biblioteca PLY (\textit{Python Lex-Yacc}) e encontra-se dividido em análise léxica, análise sintática, análise semântica, otimização simples da AST e geração de código. O projeto suporta variáveis escalares, arrays unidimensionais, expressões aritméticas, relacionais e lógicas, ciclos \texttt{DO}, condicionais \texttt{IF/THEN/ELSE/ENDIF}, \texttt{GOTO}, leitura e escrita, strings, subrotinas, funções e algumas otimizações locais.
 
-O projeto suporta declarações de variáveis escalares e arrays unidimensionais, expressões aritméticas, expressões relacionais e lógicas, estruturas condicionais \texttt{IF/THEN/ELSE/ENDIF}, ciclos \texttt{DO}, instruções \texttt{GOTO}, leitura e escrita de valores, strings em instruções de escrita, bem como geração automática de assembly para execução na máquina virtual.
-
-Ao longo do desenvolvimento foram encontradas várias dificuldades práticas, sobretudo na tradução de arrays, no controlo de fluxo com labels e na adaptação das instruções geradas ao comportamento esperado pela máquina virtual. Ainda assim, o compilador final consegue traduzir corretamente os programas de teste desenvolvidos pelo grupo.
+As maiores dificuldades estiveram relacionadas com arrays, labels, controlo de fluxo e passagem de argumentos para subprogramas.
 
 \section{Introdução}
 
-Os compiladores são ferramentas fundamentais na área das linguagens de programação, pois permitem transformar código escrito numa linguagem de alto nível em código executável numa arquitetura alvo.
+O objetivo principal do projeto foi construir um compilador capaz de traduzir programas escritos num subconjunto de Fortran 77 para assembly da máquina virtual usada na unidade curricular.
 
-O principal objetivo deste projeto consistiu na construção de um compilador capaz de traduzir programas escritos num subconjunto de Fortran 77 para código assembly da máquina virtual utilizada na unidade curricular.
+Fortran 77 é uma linguagem clássica, muito usada historicamente em aplicações científicas e numéricas. Apesar da sua sintaxe relativamente simples, apresenta desafios relevantes para este trabalho, nomeadamente ciclos baseados em labels, arrays com indexação iniciada em 1 e subprogramas.
 
-Fortran 77 é uma linguagem de programação clássica, muito utilizada historicamente em aplicações científicas e numéricas. Apesar da sua simplicidade relativamente a linguagens modernas, apresenta desafios interessantes ao nível da análise sintática e geração de código, particularmente na manipulação de arrays, ciclos com labels e controlo de fluxo.
-
-O compilador desenvolvido foi implementado em Python utilizando as bibliotecas \texttt{ply.lex} e \texttt{ply.yacc}, permitindo automatizar a construção do analisador léxico e sintático.
+Além de implementar as construções base pedidas, o grupo tentou incluir algumas funcionalidades de valorização, nomeadamente funções, subrotinas, ciclos descendentes e uma fase simples de otimização. Estas extensões obrigaram a reorganizar parte da análise semântica e da geração de código, porque passaram a existir scopes diferentes e chamadas entre partes distintas do programa.
 
 \section{Arquitetura do Compilador}
 
-O projeto foi dividido nos ficheiros principais \texttt{lexer.py}, \texttt{parser.py}, \texttt{semantic\_analyzer.py}, \texttt{translator.py} e \texttt{compiler.py}. Esta divisão permitiu separar melhor as responsabilidades de cada fase do compilador.
+O projeto foi dividido nos ficheiros principais \texttt{lexer.py}, \texttt{parser.py}, \texttt{semantic\_analyzer.py}, \texttt{optimizer.py}, \texttt{translator.py} e \texttt{compiler.py}.
 
-O compilador desenvolvido encontra-se dividido em quatro fases principais:
-
-\begin{enumerate}
-    \item Análise léxica
-    \item Análise sintática
-    \item Análise semântica
-    \item Geração de código
-\end{enumerate}
-
-O fluxo de compilação pode ser representado da seguinte forma:
+O fluxo geral é:
 
 \begin{center}
-Código Fonte $\rightarrow$ Lexer $\rightarrow$ Parser $\rightarrow$ Análise Semântica $\rightarrow$ AST $\rightarrow$ Código VM
+Código Fonte $\rightarrow$ Lexer $\rightarrow$ Parser $\rightarrow$ Análise Semântica $\rightarrow$ AST $\rightarrow$ Otimizador $\rightarrow$ Código VM
 \end{center}
 
-Inicialmente, o código Fortran é normalizado e dividido em tokens pelo analisador léxico. Posteriormente, o parser valida a estrutura gramatical do programa e constrói uma representação intermédia sob a forma de árvore sintática abstrata.
+O ficheiro \texttt{compiler.py} coordena o processo: lê o programa de entrada, invoca o parser, aplica otimizações simples e chama o tradutor para gerar o ficheiro final em código VM.
 
-Durante o parsing são também realizadas várias verificações semânticas, como a validação de declarações, tipos, arrays e labels. Por fim, o módulo de tradução percorre a árvore gerada e produz código assembly compatível com a máquina virtual fornecida.
+Cada módulo ficou responsável por uma parte concreta:
+
+\begin{itemize}
+    \item \texttt{lexer.py}: definição dos tokens e palavras reservadas;
+    \item \texttt{parser.py}: regras gramaticais e construção da AST;
+    \item \texttt{semantic\_analyzer.py}: validação de tipos, declarações, labels e subprogramas;
+    \item \texttt{optimizer.py}: simplificações locais sobre a AST;
+    \item \texttt{translator.py}: geração das instruções da máquina virtual.
+\end{itemize}
 
 \section{Análise Léxica}
 
-A análise léxica foi implementada no ficheiro \texttt{lexer.py}, utilizando a biblioteca \texttt{ply.lex}. Nesta fase, o código fonte é dividido em tokens que representam palavras reservadas, identificadores, operadores, constantes e delimitadores.
+A análise léxica foi implementada em \texttt{lexer.py} com \texttt{ply.lex}. Foram definidos tokens para palavras reservadas, identificadores, constantes, operadores e delimitadores.
 
-Foram definidos tokens para elementos fundamentais da linguagem, tais como:
-
-\begin{itemize}
-    \item \texttt{PROGRAM}
-    \item \texttt{INTEGER}
-    \item \texttt{REAL}
-    \item \texttt{LOGICAL}
-    \item \texttt{DO}
-    \item \texttt{CONTINUE}
-    \item \texttt{IF}
-    \item \texttt{THEN}
-    \item \texttt{ELSE}
-    \item \texttt{ENDIF}
-    \item \texttt{GOTO}
-    \item \texttt{PRINT}
-    \item \texttt{READ}
-    \item \texttt{END}
-\end{itemize}
-
-Além das palavras reservadas, também foram implementados tokens para:
+As principais palavras reservadas reconhecidas são:
 
 \begin{itemize}
-    \item números inteiros;
-    \item números reais;
-    \item strings;
-    \item operadores aritméticos;
-    \item operadores relacionais;
-    \item operadores lógicos;
-    \item identificadores;
-    \item delimitadores.
+    \item \texttt{PROGRAM}, \texttt{END}, \texttt{INTEGER}, \texttt{REAL}, \texttt{LOGICAL};
+    \item \texttt{IF}, \texttt{THEN}, \texttt{ELSE}, \texttt{ENDIF};
+    \item \texttt{DO}, \texttt{CONTINUE}, \texttt{GOTO};
+    \item \texttt{READ}, \texttt{PRINT};
+    \item \texttt{FUNCTION}, \texttt{SUBROUTINE}, \texttt{CALL}, \texttt{RETURN}.
 \end{itemize}
 
-Um exemplo de definição de token para números inteiros é apresentado abaixo:
+Também são reconhecidos números inteiros, números reais, strings, operadores aritméticos, relacionais e lógicos. Os valores \texttt{.TRUE.} e \texttt{.FALSE.} são representados internamente como 1 e 0.
+
+Os operadores relacionais suportados incluem a notação típica de Fortran, como \texttt{.LT.}, \texttt{.LE.}, \texttt{.GT.}, \texttt{.GE.}, \texttt{.EQ.} e \texttt{.NE.}. Também foram considerados operadores lógicos como \texttt{.AND.}, \texttt{.OR.} e \texttt{.NOT.}.
+
+Exemplo de token:
 
 \begin{lstlisting}[language=Python]
 def t_NUMBER(t):
@@ -144,144 +120,136 @@ def t_NUMBER(t):
     return t
 \end{lstlisting}
 
-Também foram reconhecidos valores lógicos como \texttt{.TRUE.} e \texttt{.FALSE.}, operadores lógicos como \texttt{.AND.}, \texttt{.OR.} e \texttt{.NOT.}, e operadores relacionais como \texttt{.LT.}, \texttt{.LE.}, \texttt{.GT.}, \texttt{.GE.}, \texttt{.EQ.} e \texttt{.NE.}.
-
-O analisador léxico ignora espaços, tabulações e comentários iniciados por \texttt{!}. As quebras de linha são tratadas como tokens, uma vez que ajudam a separar declarações e instruções no parser.
+O compilador ignora espaços, tabulações e comentários iniciados por \texttt{!}. No pré-processamento também são ignorados alguns comentários clássicos de Fortran, com \texttt{C} ou \texttt{*} na primeira coluna.
 
 \section{Análise Sintática}
 
-A análise sintática foi implementada no ficheiro \texttt{parser.py}, com recurso à biblioteca \texttt{ply.yacc}.
-
-A gramática construída permite reconhecer programas válidos escritos no subconjunto de Fortran suportado pelo compilador.
-
-A estrutura principal de um programa é composta por:
-
-\begin{itemize}
-    \item declaração do programa;
-    \item declarações de variáveis;
-    \item instruções executáveis;
-    \item instrução \texttt{END}.
-\end{itemize}
-
-De forma simplificada, a estrutura principal reconhecida pelo parser é:
+A análise sintática foi implementada em \texttt{parser.py} com \texttt{ply.yacc}. A estrutura geral aceite pelo parser é, de forma simplificada:
 
 \begin{lstlisting}
-program : PROGRAM IDENTIFIER line_end declarations statements END opt_program_name
+program : PROGRAM IDENTIFIER line_end declarations statements END opt_program_name subprograms
 \end{lstlisting}
 
-Foram também implementadas regras para:
+A gramática suporta declarações, atribuições, expressões, arrays, ciclos \texttt{DO}, condicionais, leitura, escrita, labels, \texttt{GOTO}, subrotinas e funções.
+
+Foram também criadas regras para:
 
 \begin{itemize}
-    \item declarações de variáveis escalares;
-    \item declarações de arrays unidimensionais;
-    \item expressões aritméticas;
-    \item expressões relacionais;
-    \item expressões lógicas;
-    \item atribuições;
-    \item ciclos \texttt{DO};
-    \item instruções condicionais \texttt{IF/THEN/ELSE/ENDIF};
-    \item instruções \texttt{GOTO};
-    \item leitura e escrita.
+    \item listas de variáveis em declarações;
+    \item listas de argumentos em chamadas de subprogramas;
+    \item expressões com precedência aritmética e lógica;
+    \item blocos \texttt{IF} com ou sem \texttt{ELSE};
+    \item ciclos \texttt{DO} com passo explícito ou implícito.
 \end{itemize}
 
-Um exemplo de regra gramatical para atribuições é:
+Para simplificar a distinção entre variáveis, arrays e chamadas de função, foi introduzido o conceito de \textit{designator}. Assim, uma construção como \texttt{A(I)} pode representar um acesso a array ou uma chamada de função, dependendo da informação semântica disponível.
+
+Exemplo de regra de atribuição:
 
 \begin{lstlisting}[language=Python]
 def p_assignment(p):
     """
-    assignment : variable EQ expression
+    assignment : designator EQ expression
     """
 \end{lstlisting}
 
-A utilização de PLY simplificou a construção do parser, embora tenham surgido algumas ambiguidades durante o desenvolvimento da gramática. Em particular, foi necessário definir precedências para os operadores aritméticos, relacionais e lógicos, de forma a obter a interpretação correta das expressões.
+Foi necessário definir precedências entre operadores para evitar ambiguidades em expressões aritméticas, relacionais e lógicas.
+
+Um aspeto importante foi permitir que os subprogramas fossem chamados antes da sua definição textual. Para isso, antes do parsing completo, o código é percorrido de forma simples para pré-declarar cabeçalhos de \texttt{FUNCTION} e \texttt{SUBROUTINE}.
 
 \section{Análise Semântica}
 
-A análise semântica foi concentrada principalmente no ficheiro \texttt{semantic\_analyzer.py}, embora algumas verificações sejam chamadas diretamente a partir das regras do parser.
-
-Durante esta fase foram realizadas várias verificações importantes:
+A análise semântica foi implementada principalmente em \texttt{semantic\_analyzer.py}. Esta fase verifica:
 
 \begin{itemize}
-    \item declaração prévia de variáveis;
-    \item prevenção de declarações duplicadas;
-    \item verificação de tipos;
-    \item validação de arrays;
-    \item verificação de índices de arrays;
-    \item validação de labels usados em ciclos \texttt{DO};
-    \item validação de labels usados em instruções \texttt{GOTO};
-    \item coerência das expressões.
+    \item uso de variáveis apenas depois de declaradas;
+    \item declarações duplicadas;
+    \item compatibilidade de tipos;
+    \item acessos corretos a arrays;
+    \item labels usados em \texttt{DO} e \texttt{GOTO};
+    \item existência e assinatura de funções e subrotinas;
+    \item número correto de argumentos em chamadas.
 \end{itemize}
 
-Para suportar estas verificações, foi implementada uma tabela de símbolos. Cada variável declarada é armazenada juntamente com informação relevante:
+A tabela de símbolos guarda, para cada identificador, o tipo e a dimensão, caso seja um array. Os endereços de memória são atribuídos posteriormente pelo tradutor.
 
-\begin{itemize}
-    \item nome;
-    \item tipo;
-    \item dimensão, caso seja um array.
-\end{itemize}
+Com a introdução de subprogramas, a análise semântica passou também a gerir scopes. O programa principal tem a sua tabela de símbolos, e cada função ou subrotina possui uma tabela própria. Os parâmetros formais têm de ser declarados dentro do subprograma, permitindo ao compilador conhecer o seu tipo e perceber se representam escalares ou arrays.
 
-Exemplo:
+Também são mantidas estruturas separadas para labels de cada scope, evitando que um \texttt{GOTO} dentro de uma subrotina seja validado contra labels do programa principal.
+
+Nas funções, foi seguida a convenção de Fortran: o valor de retorno é definido por uma atribuição ao identificador com o mesmo nome da função. Por exemplo:
 
 \begin{lstlisting}
-INTEGER A(10)
-REAL X
-LOGICAL FLAG
+INTEGER FUNCTION DOBRO(N)
+INTEGER N
+DOBRO = N * 2
+RETURN
+END
 \end{lstlisting}
 
-Neste caso, o compilador regista o array \texttt{A}, a variável real \texttt{X} e a variável lógica \texttt{FLAG}.
-
-A atribuição de endereços de memória não é feita diretamente pela análise semântica. Essa responsabilidade pertence ao módulo de geração de código, que percorre as declarações e reserva posições globais na memória da máquina virtual.
-
-A análise semântica também permite uma coerção simples de tipos: valores \texttt{INTEGER} podem ser atribuídos a variáveis \texttt{REAL}, sendo posteriormente gerada uma conversão para real durante a tradução.
+A coerção implícita suportada é limitada: valores \texttt{INTEGER} podem ser atribuídos a variáveis \texttt{REAL}, sendo posteriormente emitida a conversão adequada durante a geração de código.
 
 \section{Funcionalidades Suportadas}
 
 O subconjunto implementado suporta:
 
 \begin{itemize}
-    \item programas iniciados por \texttt{PROGRAM} e terminados por \texttt{END};
     \item tipos \texttt{INTEGER}, \texttt{REAL} e \texttt{LOGICAL};
-    \item variáveis escalares;
-    \item arrays unidimensionais;
-    \item expressões aritméticas com \texttt{+}, \texttt{-}, \texttt{*}, \texttt{/} e \texttt{MOD};
-    \item expressões relacionais;
-    \item expressões lógicas com \texttt{.AND.}, \texttt{.OR.} e \texttt{.NOT.};
-    \item literais lógicos \texttt{.TRUE.} e \texttt{.FALSE.};
-    \item atribuições;
-    \item leitura com \texttt{READ *, ...};
-    \item escrita com \texttt{PRINT *, ...};
-    \item strings em instruções \texttt{PRINT};
+    \item variáveis escalares e arrays unidimensionais;
+    \item expressões aritméticas, relacionais e lógicas;
+    \item \texttt{READ *} e \texttt{PRINT *}, incluindo strings;
     \item condicionais \texttt{IF/THEN/ELSE/ENDIF};
-    \item ciclos \texttt{DO} com label e \texttt{CONTINUE};
-    \item instruções \texttt{GOTO}.
+    \item ciclos \texttt{DO} com label, \texttt{CONTINUE} e passo positivo ou negativo;
+    \item \texttt{GOTO};
+    \item \texttt{SUBROUTINE}, \texttt{CALL}, \texttt{FUNCTION} e \texttt{RETURN};
+    \item passagem de argumentos escalares e arrays unidimensionais para subrotinas;
+    \item chamadas de funções em expressões;
+    \item otimizações simples antes da geração de código.
 \end{itemize}
+
+\section{Otimizações}
+
+Foi implementado o módulo \texttt{optimizer.py}, que percorre a AST antes da geração de código. As otimizações aplicadas são locais e simples:
+
+\begin{itemize}
+    \item avaliação de expressões constantes;
+    \item simplificações como \texttt{X + 0}, \texttt{X * 1} e \texttt{X * 0};
+    \item simplificação de expressões lógicas constantes;
+    \item remoção de atribuições do tipo \texttt{X = X};
+    \item remoção de ramos condicionais com condição constante, quando não há labels que possam ser afetados.
+\end{itemize}
+
+Estas otimizações não pretendem substituir uma fase de otimização avançada, mas permitem reduzir algum código desnecessário e demonstrar uma etapa adicional comum em compiladores.
+
+Por exemplo, uma expressão como:
+
+\begin{lstlisting}
+A = (2 + 3) * 4
+\end{lstlisting}
+
+pode ser simplificada antes da tradução para:
+
+\begin{lstlisting}
+A = 20
+\end{lstlisting}
+
+Também são removidas atribuições sem efeito, como \texttt{A = A}. No caso dos condicionais, a remoção de ramos só é feita quando não existe risco de eliminar labels que possam ser alvo de saltos.
 
 \section{Geração de Código}
 
-A geração de código foi implementada no ficheiro \texttt{translator.py}. Este módulo percorre a árvore sintática abstrata produzida pelo parser e traduz cada declaração, expressão e instrução para instruções da máquina virtual.
+A geração de código foi implementada em \texttt{translator.py}. O tradutor percorre a AST e emite instruções da máquina virtual.
 
-Durante esta fase são atribuídos endereços globais às variáveis. Para isso, o tradutor mantém uma tabela interna com:
+No início é gerada a instrução \texttt{START}; quando existem variáveis, é emitido \texttt{PUSHN} para reservar memória global; no fim é emitido \texttt{STOP}. O tradutor mantém uma tabela interna com o tipo, endereço, dimensão e indicação de array para cada variável.
 
-\begin{itemize}
-    \item tipo da variável;
-    \item endereço em memória;
-    \item dimensão;
-    \item indicação sobre ser ou não um array.
-\end{itemize}
+\subsection{Expressões e Condições}
 
-No início do programa é emitida a instrução \texttt{START}. Quando existem variáveis declaradas, é também emitida a instrução \texttt{PUSHN} para reservar espaço em memória global. No final é emitida a instrução \texttt{STOP}.
-
-\subsection{Expressões}
-
-As expressões aritméticas são traduzidas para instruções da máquina de pilha.
-
-Exemplo:
+As expressões são traduzidas para a máquina de pilha. Por exemplo, assumindo \texttt{A} no endereço 0 e \texttt{B} no endereço 1:
 
 \begin{lstlisting}
 A = B + 1
 \end{lstlisting}
 
-Assumindo que \texttt{A} se encontra no endereço 0 e \texttt{B} no endereço 1, o código gerado é semelhante a:
+gera código semelhante a:
 
 \begin{lstlisting}
 PUSHG 1
@@ -290,13 +258,9 @@ ADD
 STOREG 0
 \end{lstlisting}
 
-Para expressões reais são utilizadas instruções específicas da máquina virtual, como \texttt{FADD}, \texttt{FSUB}, \texttt{FMUL} e \texttt{FDIV}. Quando necessário, valores inteiros podem ser convertidos para reais através da instrução \texttt{ITOF}.
+Para valores reais são usadas instruções como \texttt{FADD}, \texttt{FSUB}, \texttt{FMUL} e \texttt{FDIV}. Condições usam instruções relacionais e saltos condicionais, como \texttt{JZ}.
 
-\subsection{Estruturas Condicionais}
-
-As instruções \texttt{IF} utilizam labels e saltos condicionais.
-
-Exemplo:
+Um exemplo simplificado de condicional é:
 
 \begin{lstlisting}
 IF (A .LT. B) THEN
@@ -304,29 +268,21 @@ IF (A .LT. B) THEN
 ENDIF
 \end{lstlisting}
 
-Código gerado de forma simplificada:
+que é traduzido com uma comparação, um salto condicional para o fim do bloco e instruções de escrita.
 
-\begin{lstlisting}
-PUSHG 0
-PUSHG 1
-INF
-JZ ELSE0
-PUSHG 0
-WRITEI
-WRITELN
-JUMP ENDIF1
-ELSE0:
-ENDIF1:
-NOP
-\end{lstlisting}
+\subsection{Ciclos DO e Arrays}
 
-O compilador também suporta blocos \texttt{ELSE}. Mesmo quando não existe \texttt{ELSE}, o tradutor gera labels internos para manter uma estrutura uniforme de saltos.
+Os ciclos \texttt{DO} são traduzidos com labels internos e saltos. Para passos positivos, o ciclo continua enquanto a variável de controlo for menor ou igual ao limite; para passos negativos, continua enquanto for maior ou igual.
 
-\subsection{Ciclos DO}
+Os arrays são guardados como blocos contínuos na memória global. Como Fortran indexa a partir de 1, o endereço de \texttt{A(I)} é calculado como:
 
-Os ciclos \texttt{DO} foram uma das partes mais trabalhosas do projeto, uma vez que em Fortran estes ciclos usam labels para indicar o ponto final.
+\begin{center}
+endereço base + (índice - 1)
+\end{center}
 
-Exemplo:
+São usadas instruções como \texttt{PUSHGP}, \texttt{PADD}, \texttt{CHECK}, \texttt{LOAD} e \texttt{STORE}. A instrução \texttt{CHECK} valida limites em tempo de execução.
+
+Um ciclo típico:
 
 \begin{lstlisting}
 DO 100 I = 1, N
@@ -334,154 +290,90 @@ DO 100 I = 1, N
 100 CONTINUE
 \end{lstlisting}
 
-Código gerado de forma simplificada:
+é traduzido usando uma label de início, uma comparação com o limite, um salto para o fim e uma atualização da variável de controlo. Esta parte foi uma das mais sensíveis, porque o label Fortran do \texttt{CONTINUE} tem de coincidir com o indicado na instrução \texttt{DO}.
+
+\subsection{Subprogramas}
+
+O compilador suporta subrotinas e funções simples. Como a máquina virtual não disponibiliza uma pilha de chamadas de alto nível para esta funcionalidade, os subprogramas são traduzidos diretamente no ponto de chamada. Por este motivo, chamadas recursivas não são suportadas.
+
+Exemplo de subrotina:
 
 \begin{lstlisting}
-PUSHI 1
-STOREG 0
+PROGRAM TESTSUB
+INTEGER A, B
+A = 14
+B = 0
+CALL SOMAUM(A, B)
+PRINT *, A, B
+END
 
-DO0:
-PUSHG 0
-PUSHG 1
-INFEQ
-JZ ENDDO1
-
-...
-
-PUSHG 0
-PUSHI 1
-ADD
-STOREG 0
-JUMP DO0
-
-ENDDO1:
-L100:
-NOP
+SUBROUTINE SOMAUM(X, Y)
+INTEGER X, Y
+Y = X + 1
+X = X + 1
+RETURN
+END
 \end{lstlisting}
 
-O compilador suporta ainda um passo opcional no ciclo \texttt{DO}. Quando o passo não é indicado, é assumido o valor \texttt{1}.
+Para subrotinas, o tradutor usa aliases entre parâmetros formais e argumentos reais, permitindo que alterações em variáveis ou arrays sejam refletidas fora da subrotina.
 
-\subsection{Arrays}
+As funções são tratadas de forma semelhante, mas devolvem um valor. Antes da execução do corpo da função, os argumentos são copiados para as posições de memória dos parâmetros formais. No fim, o valor da variável com o nome da função é colocado na pilha para ser usado pela expressão chamadora.
 
-A manipulação de arrays exigiu cálculos de offsets em memória.
+Esta estratégia funciona para os exemplos suportados, mas não implementa uma pilha de chamadas completa. Por isso, chamadas recursivas foram explicitamente excluídas.
 
-Os arrays são tratados como blocos contínuos na memória global. Como em Fortran os índices começam em 1, o endereço de um elemento é calculado da seguinte forma:
+\section{Testes}
 
-\begin{center}
-endereço base + (índice - 1)
-\end{center}
+Foram criados testes válidos e inválidos. Os testes válidos são compilados e comparados com o código VM esperado; os inválidos confirmam que erros sintáticos ou semânticos são detetados.
 
-Para aceder a um elemento do array, são utilizadas instruções como:
+Entre os testes válidos encontram-se:
 
 \begin{itemize}
-    \item \texttt{PUSHGP}
-    \item \texttt{PADD}
-    \item \texttt{CHECK}
-    \item \texttt{LOAD}
-    \item \texttt{STORE}
+    \item \texttt{somaarr.f77}: arrays e ciclos \texttt{DO};
+    \item \texttt{primo.f77}: condições, ciclos e \texttt{MOD};
+    \item \texttt{real\_logical.f77}: reais e lógicos;
+    \item \texttt{do\_descendente.f77}: passo negativo;
+    \item \texttt{subroutine\_scalar.f77}: subrotinas com escalares;
+    \item \texttt{subroutine\_array.f77}: subrotinas com arrays;
+    \item \texttt{conversor.f77}: funções em expressões;
+    \item \texttt{optimization\_local.f77}: otimizações simples.
 \end{itemize}
 
-A instrução \texttt{CHECK} é utilizada para validar os limites do array em tempo de execução.
-
-Exemplo simplificado de acesso a \texttt{A(I)}:
+A execução automática é feita com:
 
 \begin{lstlisting}
-PUSHGP
-PUSHI endereco_base
-PADD
-PUSHG endereco_i
-CHECK 1, tamanho
-PUSHI 1
-SUB
-PADD
-LOAD 0
+python3 tests/run_tests.py
 \end{lstlisting}
 
-Inicialmente, esta parte exigiu especial atenção porque a indexação de Fortran começa em 1, enquanto o cálculo do offset em memória tem de partir de 0. Por isso, foi necessário subtrair 1 ao índice antes de calcular o endereço final.
+Durante o desenvolvimento, estes testes foram úteis para encontrar problemas de geração de código. Em particular, os testes com arrays ajudaram a corrigir acessos deslocados por causa da indexação iniciada em 1, e os testes de subrotinas ajudaram a validar a passagem de escalares e arrays por referência.
 
-\subsection{Leitura e Escrita}
+\section{Dificuldades e Limitações}
 
-A instrução \texttt{READ *, ...} é traduzida usando a instrução \texttt{READ} da máquina virtual, seguida da conversão adequada:
-
-\begin{itemize}
-    \item \texttt{ATOI} para inteiros;
-    \item \texttt{ATOF} para reais;
-    \item \texttt{ATOI} para valores lógicos representados como 0 ou 1.
-\end{itemize}
-
-A instrução \texttt{PRINT *, ...} suporta inteiros, reais, valores lógicos e strings.
-
-Para escrita são utilizadas instruções como:
+As principais dificuldades foram:
 
 \begin{itemize}
-    \item \texttt{WRITEI};
-    \item \texttt{WRITEF};
-    \item \texttt{WRITES};
-    \item \texttt{WRITELN}.
+    \item cálculo correto de offsets em arrays, devido à indexação iniciada em 1;
+    \item geração correta de labels e saltos para \texttt{DO}, \texttt{IF} e \texttt{GOTO};
+    \item distinção entre chamada de função e acesso a array;
+    \item passagem de argumentos para subrotinas, sobretudo arrays;
+    \item compatibilização entre tipos inteiros, reais e lógicos.
 \end{itemize}
 
-\section{Dificuldades Encontradas}
-
-Ao longo do desenvolvimento surgiram várias dificuldades técnicas.
-
-\subsection{Gramática}
-
-Uma das principais dificuldades esteve relacionada com conflitos e ambiguidades da gramática no parser LALR.
-
-Foi necessário definir precedências entre operadores e organizar cuidadosamente as regras gramaticais para suportar expressões aritméticas, relacionais e lógicas.
-
-\subsection{Arrays}
-
-A implementação de arrays revelou-se particularmente complexa devido:
-
-\begin{itemize}
-    \item ao cálculo de offsets;
-    \item à gestão de memória;
-    \item à indexação iniciada em 1;
-    \item à utilização correta da instrução \texttt{CHECK};
-    \item à distinção entre variáveis escalares e arrays.
-\end{itemize}
-
-Uma dificuldade concreta foi garantir a ordem correta das instruções no caso de atribuições a elementos de arrays, por exemplo em expressões como \texttt{A(I) = A(I) + 1}. Nestes casos, é necessário calcular o valor a guardar e, ao mesmo tempo, calcular corretamente o endereço do elemento de destino.
-
-\subsection{Ciclos DO}
-
-Os ciclos \texttt{DO} em Fortran 77 utilizam labels para identificar o fim do ciclo, o que dificultou a tradução para estruturas de salto da máquina virtual.
-
-Foi necessário implementar geração automática de labels internas para controlar corretamente o fluxo do programa, garantindo ao mesmo tempo que o label indicado no \texttt{DO} corresponde ao label da instrução \texttt{CONTINUE}.
-
-\subsection{Tipos}
-
-A coexistência de variáveis \texttt{INTEGER}, \texttt{REAL} e \texttt{LOGICAL} obrigou à implementação de verificações de tipos, coerções simples e escolha correta das instruções da máquina virtual.
-
-Por exemplo, operações entre valores reais utilizam instruções de vírgula flutuante, enquanto operações entre inteiros utilizam instruções inteiras.
-
-\subsection{Labels e GOTO}
-
-A existência de labels explícitos e instruções \texttt{GOTO} exigiu validação adicional. O compilador regista os labels usados e definidos, garantindo que não existem saltos para labels inexistentes.
-
-\section{Limitações}
-
-Apesar de funcional, o compilador implementa apenas um subconjunto da linguagem Fortran 77.
-
-As principais limitações são:
+As principais limitações atuais são:
 
 \begin{itemize}
     \item apenas são suportados arrays unidimensionais;
-    \item os arrays usam índices iniciados em 1;
-    \item os ciclos \texttt{DO} foram pensados principalmente para incrementos positivos;
-    \item não são suportadas funções nem subrotinas;
-    \item não existe geração de código intermédio independente da máquina virtual;
-    \item o formato fixo clássico de Fortran 77 não é tratado integralmente;
-    \item comentários são suportados apenas no formato iniciado por \texttt{!};
+    \item os subprogramas suportados cobrem apenas casos simples de \texttt{FUNCTION} e \texttt{SUBROUTINE};
+    \item não há suporte a recursão;
+    \item não existe uma pilha de chamadas completa, sendo os subprogramas traduzidos no ponto de chamada;
+    \item o formato fixo clássico de Fortran 77 não é suportado integralmente;
     \item a recuperação de erros é simples.
 \end{itemize}
 
+Apesar destas limitações, o subconjunto implementado é suficiente para executar programas com cálculos inteiros e reais, manipulação de arrays, estruturas de controlo, leitura/escrita e subprogramas simples.
+
 \section{Instruções de Utilização}
 
-O compilador pode ser executado através do terminal utilizando Python 3.
-
-Comando geral:
+O compilador pode ser executado com:
 
 \begin{lstlisting}
 python3 compiler.py input.f77 output.vm
@@ -493,72 +385,17 @@ Exemplo:
 python3 compiler.py tests/somaarr.f77 tests/output/somaarr.vm
 \end{lstlisting}
 
-Após a compilação, o ficheiro gerado pode ser executado na máquina virtual fornecida na unidade curricular.
-
-\subsection{Requisitos}
+Requisitos:
 
 \begin{itemize}
-    \item Python 3
-    \item Biblioteca PLY
+    \item Python 3;
+    \item biblioteca PLY.
 \end{itemize}
-
-Instalação do PLY:
-
-\begin{lstlisting}
-pip install ply
-\end{lstlisting}
-
-Também pode ser criado um ambiente virtual:
-
-\begin{lstlisting}
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install ply
-\end{lstlisting}
-
-\section{Exemplo de Programa}
-
-Um exemplo de programa suportado pelo compilador é:
-
-\begin{lstlisting}
-PROGRAM SOMAARR
-INTEGER I, N, A(10), S
-
-N = 10
-S = 0
-
-DO 100 I = 1, N
-    A(I) = I
-    S = S + A(I)
-100 CONTINUE
-
-PRINT *, 'SOMA = ', S
-
-END
-\end{lstlisting}
-
-Este programa declara um array, preenche-o com valores inteiros, calcula a soma dos seus elementos e imprime o resultado.
 
 \section{Conclusão}
 
-O projeto permitiu aplicar, de forma prática, os conteúdos abordados na unidade curricular, desde a análise léxica até à geração de código para uma máquina virtual.
+O projeto permitiu aplicar os principais conceitos abordados na unidade curricular: análise léxica, análise sintática, análise semântica, otimização simples e geração de código.
 
-No final, o compilador consegue processar os exemplos desenvolvidos pelo grupo, incluindo programas com arrays, ciclos \texttt{DO}, condições, labels, instruções de leitura/escrita e expressões com diferentes tipos.
-
-As maiores dificuldades estiveram relacionadas com arrays, controlo de fluxo, validação de labels e adaptação às instruções disponíveis na máquina virtual.
-
-Como trabalho futuro, seria interessante adicionar suporte para:
-
-\begin{itemize}
-    \item funções e subrotinas;
-    \item arrays multidimensionais;
-    \item otimizações de código;
-    \item mais tipos de dados;
-    \item melhor recuperação de erros;
-    \item suporte mais fiel ao formato fixo clássico de Fortran 77;
-    \item geração de código intermédio.
-\end{itemize}
-
-Considera-se que os objetivos principais do projeto foram cumpridos, tendo sido desenvolvido um compilador modular, com análise léxica, sintática e semântica, e geração de código para a máquina virtual.
+O compilador final processa programas com variáveis, arrays, ciclos, condições, leitura/escrita, labels, funções, subrotinas e expressões com diferentes tipos. Como trabalho futuro, seria interessante adicionar arrays multidimensionais, recursão, uma pilha de chamadas mais completa, melhor recuperação de erros e suporte mais fiel ao formato fixo clássico de Fortran 77.
 
 \end{document}

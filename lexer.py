@@ -7,6 +7,8 @@ reserved = {
     "REAL": "REAL",
     "LOGICAL": "LOGICAL",
     "FUNCTION": "FUNCTION",
+    "SUBROUTINE": "SUBROUTINE",
+    "CALL": "CALL",
     "RETURN": "RETURN",
     "IF": "IF",
     "THEN": "THEN",

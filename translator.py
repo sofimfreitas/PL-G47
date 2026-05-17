@@ -34,18 +34,22 @@ class Translator:
         if self.next_addr > 0:
             self.emit(f"PUSHN {self.next_addr}")
 
-        main_context = {
-            "symbols": self.main_symbols,
-            "labels": {},
-            "return_label": None,
-            "subprogram_name": None,
-        }
+        main_context = self.make_context(self.main_symbols)
 
         for stmt in ast["statements"]:
             self.translate_statement(stmt, main_context)
 
         self.emit("STOP")
         return "\n".join(self.code) + "\n"
+
+    def make_context(self, symbols, return_label=None, subprogram_name=None, aliases=None):
+        return {
+            "symbols": symbols,
+            "labels": {},
+            "return_label": return_label,
+            "subprogram_name": subprogram_name,
+            "aliases": aliases or {},
+        }
 
     def collect_program_layout(self, ast):
         self.main_symbols = self.allocate_scope_symbols(ast["declarations"])
@@ -100,6 +104,9 @@ class Translator:
     def addr_of(self, context, name):
         return self.symbol_of(context, name)["addr"]
 
+    def alias_of(self, context, name):
+        return context.get("aliases", {}).get(name.upper())
+
     def label_name(self, context, label):
         label = int(label)
         if label not in context["labels"]:
@@ -109,6 +116,15 @@ class Translator:
     def quote_string(self, value):
         escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
+
+    def variable_node(self, context, name):
+        symbol = self.symbol_of(context, name)
+        return {
+            "node": "variable",
+            "name": name.upper(),
+            "type": symbol["type"],
+            "size": None,
+        }
 
     def translate_statement(self, stmt, context):
         node = stmt["node"]
@@ -135,12 +151,15 @@ class Translator:
         elif node == "goto":
             self.emit(f"JUMP {self.label_name(context, stmt['label'])}")
 
+        elif node == "subroutine_call":
+            self.translate_subroutine_call(stmt, context)
+
         elif node == "continue":
             self.emit("NOP")
 
         elif node == "return":
             if context["return_label"] is None:
-                raise NotImplementedError("RETURN só é suportado dentro de FUNCTION.")
+                raise NotImplementedError("RETURN só é suportado dentro de FUNCTION ou SUBROUTINE.")
             self.emit(f"JUMP {context['return_label']}")
 
         else:
@@ -184,20 +203,21 @@ class Translator:
 
     def translate_do(self, stmt, context):
         var_name = stmt["var"].upper()
+        var_node = self.variable_node(context, var_name)
         loop_label = self.new_label("DO")
         end_label = self.new_label("ENDDO")
 
         self.translate_expression(stmt["start"], context)
-        self.emit(f"STOREG {self.addr_of(context, var_name)}")
+        self.store_variable(var_node, context)
 
         self.emit(f"{loop_label}:")
         if self.is_negative_integer_literal(stmt["step"]):
-            self.emit(f"PUSHG {self.addr_of(context, var_name)}")
+            self.translate_expression(var_node, context)
             self.translate_expression(stmt["end"], context)
             self.emit("SUPEQ")
             self.emit(f"JZ {end_label}")
         elif self.is_integer_literal(stmt["step"]):
-            self.emit(f"PUSHG {self.addr_of(context, var_name)}")
+            self.translate_expression(var_node, context)
             self.translate_expression(stmt["end"], context)
             self.emit("INFEQ")
             self.emit(f"JZ {end_label}")
@@ -210,14 +230,14 @@ class Translator:
             self.emit("INF")
             self.emit(f"JZ {positive_step_label}")
 
-            self.emit(f"PUSHG {self.addr_of(context, var_name)}")
+            self.translate_expression(var_node, context)
             self.translate_expression(stmt["end"], context)
             self.emit("SUPEQ")
             self.emit(f"JZ {end_label}")
             self.emit(f"JUMP {body_label}")
 
             self.emit(f"{positive_step_label}:")
-            self.emit(f"PUSHG {self.addr_of(context, var_name)}")
+            self.translate_expression(var_node, context)
             self.translate_expression(stmt["end"], context)
             self.emit("INFEQ")
             self.emit(f"JZ {end_label}")
@@ -226,10 +246,10 @@ class Translator:
         for inner_stmt in stmt["body"]:
             self.translate_statement(inner_stmt, context)
 
-        self.emit(f"PUSHG {self.addr_of(context, var_name)}")
+        self.translate_expression(var_node, context)
         self.translate_expression(stmt["step"], context)
         self.emit("ADD")
-        self.emit(f"STOREG {self.addr_of(context, var_name)}")
+        self.store_variable(var_node, context)
         self.emit(f"JUMP {loop_label}")
 
         self.emit(f"{end_label}:")
@@ -285,11 +305,18 @@ class Translator:
             self.emit(f"PUSHI {expr['value']}")
 
         elif node == "variable":
-            self.emit(f"PUSHG {self.addr_of(context, expr['name'])}")
+            alias = self.alias_of(context, expr["name"])
+            if alias is not None and alias["target"]["node"] != "array_argument":
+                self.translate_expression(alias["target"], alias["context"])
+            else:
+                self.emit(f"PUSHG {self.addr_of(context, expr['name'])}")
 
         elif node == "array_access":
             self.translate_array_address(expr, context)
             self.emit("LOAD 0")
+
+        elif node == "array_argument":
+            raise NotImplementedError("Um array inteiro só pode ser passado como argumento de SUBROUTINE.")
 
         elif node == "cast":
             self.translate_expression(expr["expr"], context)
@@ -327,19 +354,18 @@ class Translator:
         subprogram = self.subprograms[function_name]
 
         if function_name in self.active_subprogram_calls:
-            raise NotImplementedError("Recursão de funções ainda não é suportada.")
+            raise NotImplementedError("Recursão de subprogramas ainda não é suportada.")
 
         for param_name, arg_expr in zip(subprogram["params"], expr["args"]):
             self.translate_expression(arg_expr, caller_context)
             self.emit(f"STOREG {subprogram['symbols'][param_name]['addr']}")
 
         return_label = self.new_label(f"RET{function_name}")
-        inline_context = {
-            "symbols": subprogram["symbols"],
-            "labels": {},
-            "return_label": return_label,
-            "subprogram_name": function_name,
-        }
+        inline_context = self.make_context(
+            subprogram["symbols"],
+            return_label=return_label,
+            subprogram_name=function_name,
+        )
 
         self.active_subprogram_calls.append(function_name)
         for stmt in subprogram["statements"]:
@@ -348,6 +374,55 @@ class Translator:
 
         self.emit(f"{return_label}:")
         self.emit(f"PUSHG {subprogram['symbols'][subprogram['return_name']]['addr']}")
+
+    def translate_subroutine_call(self, stmt, caller_context):
+        subroutine_name = stmt["name"].upper()
+        subprogram = self.subprograms[subroutine_name]
+
+        if subroutine_name in self.active_subprogram_calls:
+            raise NotImplementedError("Recursão de subprogramas ainda não é suportada.")
+
+        aliases = {}
+        for param_name, arg in zip(subprogram["params"], stmt["args"]):
+            param_symbol = subprogram["symbols"][param_name]
+
+            if arg["node"] == "array_argument":
+                if not param_symbol["is_array"]:
+                    raise NotImplementedError(
+                        f"Parâmetro escalar '{param_name}' recebeu array completo."
+                    )
+                aliases[param_name] = {"target": arg, "context": caller_context}
+
+            elif arg["node"] in ("variable", "array_access"):
+                if param_symbol["is_array"]:
+                    raise NotImplementedError(
+                        f"Parâmetro array '{param_name}' exige um array completo como argumento."
+                    )
+                aliases[param_name] = {"target": arg, "context": caller_context}
+
+            else:
+                if param_symbol["is_array"]:
+                    raise NotImplementedError(
+                        f"Parâmetro array '{param_name}' não pode receber uma expressão escalar."
+                    )
+                self.translate_expression(arg, caller_context)
+                self.emit(f"STOREG {param_symbol['addr']}")
+
+        return_label = self.new_label(f"RET{subroutine_name}")
+        inline_context = self.make_context(
+            subprogram["symbols"],
+            return_label=return_label,
+            subprogram_name=subroutine_name,
+            aliases=aliases,
+        )
+
+        self.active_subprogram_calls.append(subroutine_name)
+        for inner_stmt in subprogram["statements"]:
+            self.translate_statement(inner_stmt, inline_context)
+        self.active_subprogram_calls.pop()
+
+        self.emit(f"{return_label}:")
+        self.emit("NOP")
 
     def operation_instruction(self, op, expr_type):
         if expr_type == "INTEGER":
@@ -447,7 +522,11 @@ class Translator:
 
     def store_variable(self, var, context):
         if var["node"] == "variable":
-            self.emit(f"STOREG {self.addr_of(context, var['name'])}")
+            alias = self.alias_of(context, var["name"])
+            if alias is not None and alias["target"]["node"] != "array_argument":
+                self.store_variable(alias["target"], alias["context"])
+            else:
+                self.emit(f"STOREG {self.addr_of(context, var['name'])}")
 
         elif var["node"] == "array_access":
             self.translate_array_address(var, context)
@@ -457,14 +536,35 @@ class Translator:
         else:
             raise NotImplementedError(f"Destino de atribuição inválido: {var['node']}")
 
-    def translate_array_address(self, var, context):
-        symbol = self.symbol_of(context, var["name"])
-        base_addr = symbol["addr"]
-
+    def emit_array_base_address(self, context, name):
+        base_addr = self.addr_of(context, name)
         self.emit("PUSHGP")
         self.emit(f"PUSHI {base_addr}")
         self.emit("PADD")
 
+    def translate_array_address(self, var, context):
+        alias = self.alias_of(context, var["name"])
+
+        if alias is not None:
+            target = alias["target"]
+            target_context = alias["context"]
+
+            if target["node"] != "array_argument":
+                raise NotImplementedError(
+                    f"Parâmetro escalar '{var['name']}' não pode ser usado como array."
+                )
+
+            target_symbol = self.symbol_of(target_context, target["name"])
+            self.emit_array_base_address(target_context, target["name"])
+            self.translate_expression(var["index"], context)
+            self.emit(f"CHECK 1, {target_symbol['size']}")
+            self.emit("PUSHI 1")
+            self.emit("SUB")
+            self.emit("PADD")
+            return
+
+        symbol = self.symbol_of(context, var["name"])
+        self.emit_array_base_address(context, var["name"])
         self.translate_expression(var["index"], context)
         self.emit(f"CHECK 1, {symbol['size']}")
         self.emit("PUSHI 1")
