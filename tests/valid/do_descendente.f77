@@ -1,0 +1,8 @@
+PROGRAM DESC
+INTEGER I, SOMA
+SOMA = 0
+DO 40 I = 5, 1, -1
+SOMA = SOMA + I
+40 CONTINUE
+PRINT *, 'Soma descendente: ', SOMA
+END

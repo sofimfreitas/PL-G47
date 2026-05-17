@@ -1,0 +1,14 @@
+PROGRAM REALLOG
+INTEGER A
+REAL X, Y
+LOGICAL OK
+A = 2
+X = A
+Y = X + 3.5
+OK = Y .GE. 5.5
+IF (OK .AND. .NOT. .FALSE.) THEN
+PRINT *, 'resultado: ', Y
+ELSE
+PRINT *, 'erro'
+ENDIF
+END

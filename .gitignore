@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+parser.out
+parsetab.py
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+docs/*.aux
+docs/*.fdb_latexmk
+docs/*.fls
+docs/*.log
+docs/*.out
+docs/*.synctex.gz
+docs/*.toc

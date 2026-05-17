@@ -67,6 +67,10 @@ def make_relational(op, left, right):
     }
 
 
+def is_zero_integer_literal(expr):
+    return expr["node"] == "number" and expr["value"] == 0
+
+
 def labelled_statement(label, stmt):
     semantic.define_label(label)
     return {
@@ -402,6 +406,9 @@ def p_do_statement(p):
     if p[5]["type"] != "INTEGER" or p[7]["type"] != "INTEGER" or p[8]["type"] != "INTEGER":
         raise SemanticError("Os limites e o passo do ciclo DO têm de ser INTEGER.")
 
+    if is_zero_integer_literal(p[8]):
+        raise SemanticError("O passo do ciclo DO não pode ser zero.")
+
     semantic.register_do_label(do_label)
     semantic.define_label(cont_label)
 
@@ -487,21 +494,6 @@ def p_endif_line_two_tokens(p):
 #  Condições
 # ─────────────────────────────────────────────
 
-def p_condition_relational(p):
-    """
-    condition : expression relop expression
-    """
-    p[0] = make_relational(p[2], p[1], p[3])
-
-
-def p_relop(p):
-    """
-    relop : RELOP
-          | EQ
-    """
-    p[0] = p[1]
-
-
 def p_condition_logical(p):
     """
     condition : condition LOGOP condition
@@ -551,6 +543,14 @@ def p_condition_expression(p):
 # ─────────────────────────────────────────────
 #  Expressões
 # ─────────────────────────────────────────────
+
+def p_expression_relational(p):
+    """
+    expression : expression RELOP expression
+               | expression EQ expression
+    """
+    p[0] = make_relational(p[2], p[1], p[3])
+
 
 def p_expression_binary(p):
     """
@@ -698,6 +698,10 @@ def preprocess_source(data):
     """Normaliza para free-form: ignora linhas vazias e espaços à volta das linhas."""
     lines = []
     for line in data.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if line and line[0].upper() == "C":
+            continue
+        if line and line[0] == "*":
+            continue
         stripped = line.strip()
         if not stripped:
             continue

@@ -142,10 +142,37 @@ class Translator:
         self.emit(f"STOREG {self.addr_of(var_name)}")
 
         self.emit(f"{loop_label}:")
-        self.emit(f"PUSHG {self.addr_of(var_name)}")
-        self.translate_expression(stmt["end"])
-        self.emit("INFEQ")
-        self.emit(f"JZ {end_label}")
+        if self.is_negative_integer_literal(stmt["step"]):
+            self.emit(f"PUSHG {self.addr_of(var_name)}")
+            self.translate_expression(stmt["end"])
+            self.emit("SUPEQ")
+            self.emit(f"JZ {end_label}")
+        elif self.is_integer_literal(stmt["step"]):
+            self.emit(f"PUSHG {self.addr_of(var_name)}")
+            self.translate_expression(stmt["end"])
+            self.emit("INFEQ")
+            self.emit(f"JZ {end_label}")
+        else:
+            positive_step_label = self.new_label("DOSTEPPOS")
+            body_label = self.new_label("DOBODY")
+
+            self.translate_expression(stmt["step"])
+            self.emit("PUSHI 0")
+            self.emit("INF")
+            self.emit(f"JZ {positive_step_label}")
+
+            self.emit(f"PUSHG {self.addr_of(var_name)}")
+            self.translate_expression(stmt["end"])
+            self.emit("SUPEQ")
+            self.emit(f"JZ {end_label}")
+            self.emit(f"JUMP {body_label}")
+
+            self.emit(f"{positive_step_label}:")
+            self.emit(f"PUSHG {self.addr_of(var_name)}")
+            self.translate_expression(stmt["end"])
+            self.emit("INFEQ")
+            self.emit(f"JZ {end_label}")
+            self.emit(f"{body_label}:")
 
         for inner_stmt in stmt["body"]:
             self.translate_statement(inner_stmt)
@@ -159,6 +186,23 @@ class Translator:
         self.emit(f"{end_label}:")
         self.emit(f"L{stmt['label']}:")
         self.emit("NOP")
+
+    def is_negative_integer_literal(self, expr):
+        if expr["node"] == "number":
+            return expr["value"] < 0
+        return (
+            expr["node"] == "unary_expression"
+            and expr["op"] == "-"
+            and expr["expr"]["node"] == "number"
+            and expr["expr"]["value"] > 0
+        )
+
+    def is_integer_literal(self, expr):
+        return expr["node"] == "number" or (
+            expr["node"] == "unary_expression"
+            and expr["op"] == "-"
+            and expr["expr"]["node"] == "number"
+        )
 
     def translate_if(self, stmt):
         else_label = self.new_label("ELSE")
@@ -219,6 +263,9 @@ class Translator:
             self.translate_expression(expr["left"])
             self.translate_expression(expr["right"])
             self.emit(self.operation_instruction(expr["op"], expr["type"]))
+
+        elif node in ("condition", "logical_condition", "not_condition"):
+            self.translate_condition(expr)
 
         else:
             raise NotImplementedError(f"Expressão não suportada: {node}")

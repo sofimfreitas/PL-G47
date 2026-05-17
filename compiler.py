@@ -29,4 +29,4 @@ if __name__ == "__main__":
         print("Uso: python3 compiler.py input.f77 output.vm")
         sys.exit(1)
 
-    compile_file(sys.argv[1], sys.argv[2])
+    sys.exit(0 if compile_file(sys.argv[1], sys.argv[2]) else 1)
