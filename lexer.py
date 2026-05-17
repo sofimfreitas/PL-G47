@@ -6,6 +6,8 @@ reserved = {
     "INTEGER": "INTEGER",
     "REAL": "REAL",
     "LOGICAL": "LOGICAL",
+    "FUNCTION": "FUNCTION",
+    "RETURN": "RETURN",
     "IF": "IF",
     "THEN": "THEN",
     "ELSE": "ELSE",

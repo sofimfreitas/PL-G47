@@ -21,7 +21,7 @@ ADD
 STOREG 0
 JUMP DO0
 ENDDO1:
-L40:
+L402:
 NOP
 PUSHS "Soma descendente: "
 WRITES

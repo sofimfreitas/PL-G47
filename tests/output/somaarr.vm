@@ -42,7 +42,7 @@ ADD
 STOREG 5
 JUMP DO0
 ENDDO1:
-L30:
+L302:
 NOP
 PUSHS "A soma dos numeros e: "
 WRITES
